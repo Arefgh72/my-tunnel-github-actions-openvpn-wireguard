@@ -1,0 +1,27 @@
+name: Get socat deb
+
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+jobs:
+  get-deb:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download socat and dependencies
+        run: |
+          sudo apt update
+          cd /tmp
+          apt download socat
+          mkdir -p $GITHUB_WORKSPACE/socat_debs
+          cp *.deb $GITHUB_WORKSPACE/socat_debs/
+      - name: Push debs
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add socat_debs/
+          git commit -m "Add socat packages"
+          git push
