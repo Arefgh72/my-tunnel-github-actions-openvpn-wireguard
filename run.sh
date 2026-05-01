@@ -1,12 +1,15 @@
 #!/bin/bash
 set -e
 
+# ذخیره اعتبارنامه گیت برای همیشه (تا هر بار رمز پرسیده نشود)
+git config --global credential.helper store
+
 echo "Requesting tunnel..."
 git commit --allow-empty -m "TUNNEL_REQUEST" && git push
 
 echo "Waiting for runner endpoint..."
 while [ ! -f runner_endpoint.txt ]; do
-  git pull --rebase origin main
+  git pull --rebase origin master
   sleep 3
 done
 RUNNER_EP=$(cat runner_endpoint.txt)
@@ -20,7 +23,7 @@ git commit -m "CLIENT_PUBKEY" && git push
 
 echo "Waiting for runner public key..."
 while [ ! -f runner_pubkey.txt ]; do
-  git pull --rebase origin main
+  git pull --rebase origin master
   sleep 3
 done
 RUNNER_PUBKEY=$(cat runner_pubkey.txt)
@@ -36,7 +39,7 @@ done
 
 echo "Waiting for our external endpoint..."
 while [ ! -f client_endpoint.txt ]; do
-  git pull --rebase origin main
+  git pull --rebase origin master
   sleep 3
 done
 CLIENT_EP=$(cat client_endpoint.txt)
