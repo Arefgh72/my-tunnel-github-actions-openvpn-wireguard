@@ -1,0 +1,36 @@
+name: TCP SOCKS5 Tunnel
+
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: write
+
+jobs:
+  tunnel:
+    if: contains(github.event.head_commit.message, 'SOCKS_TCP_REQUEST')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Publish endpoint
+        run: |
+          PUBLIC_IP=$(curl -s ifconfig.me)
+          PORT=$((20000 + RANDOM % 10000))
+          echo "$PUBLIC_IP:$PORT" > socks_endpoint.txt
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add socks_endpoint.txt
+          git commit -m "SOCKS_ENDPOINT"
+          git push
+
+      - name: Start simple TCP forwarder (relay to a local HTTP proxy for testing)
+        run: |
+          PORT=$(cat socks_endpoint.txt | cut -d: -f2)
+          # Create a simple TCP echo server first to test connectivity
+          # (We will replace with a proper SOCKS server after success)
+          socat TCP-LISTEN:$PORT,fork EXEC:'cat' &
+          sleep 21600
