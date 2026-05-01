@@ -34,14 +34,14 @@ jobs:
         run: |
           PORT=$(cat stun_server.txt | cut -d: -f2)
           timeout 60 python3 -c "
-import socket, subprocess
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.bind(('0.0.0.0', $PORT))
-data, addr = sock.recvfrom(1024)
-with open('client_stun.txt', 'w') as f:
-    f.write(f'{addr[0]}:{addr[1]}')
-sock.close()
-"
+          import socket, subprocess
+          sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          sock.bind(('0.0.0.0', $PORT))
+          data, addr = sock.recvfrom(1024)
+          with open('client_stun.txt', 'w') as f:
+          f.write(f'{addr[0]}:{addr[1]}')
+          sock.close()
+          "
           if [ -f client_stun.txt ]; then
             git add client_stun.txt
             git commit -m "CLIENT_STUN_ADDRESS"
