@@ -1,0 +1,40 @@
+name: WebSocket Tunnel
+
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: write
+
+jobs:
+  tunnel:
+    if: contains(github.event.head_commit.message, 'WS_TUNNEL_REQUEST')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Copy websocat from repo
+        run: cp tools/websocat /usr/local/bin/websocat && chmod +x /usr/local/bin/websocat
+
+      - name: Publish endpoint
+        run: |
+          PUBLIC_IP=$(curl -s ifconfig.me)
+          PORT=$((20000 + RANDOM % 10000))
+          echo "$PUBLIC_IP:$PORT" > ws_endpoint.txt
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add ws_endpoint.txt
+          git commit -m "WS_ENDPOINT"
+          git push
+
+      - name: Start WebSocket to TCP bridge
+        run: |
+          PORT=$(cat ws_endpoint.txt | cut -d: -f2)
+          # Run a simple TCP echo server to test connectivity
+          socat TCP-LISTEN:12345,fork EXEC:'cat' &
+          # Bridge WebSocket to that echo server
+          websocat -s 0.0.0.0:$PORT --binary ws-l:127.0.0.1:12345 &
+          sleep 21600
