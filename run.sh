@@ -1,89 +1,52 @@
 #!/bin/bash
-if [[ ! "$1" ]] || ! ([[ "$1" == "wireguard" ]] || [[ "$1" == "openvpn" ]]); then
-  echo "$0 <openvpn / wireguard>"
-  exit 1
-fi
+set -e
 
-# Check for stun client by hanpfei
-STUN=""
-[[ "$(command -v stun-client)" ]] && STUN="stun-client"
-[[ "$(command -v stun)" ]] && STUN="stun"
-if [[ ! "$STUN" ]]; then
-  echo "stun client not found, please install 'stun' or 'stun-client' package!"
-  exit 2
-fi
+echo "Requesting tunnel..."
+git commit --allow-empty -m "TUNNEL_REQUEST" && git push
 
-# Check for any netcat implementation
-if [[ ! "$(command -v nc)" ]]; then
-  echo "Some NAT types require netcat, but it is not found. Please install 'netcat', 'netcat-openbsd', 'ncat' or 'nc' package!"
-  exit 3
-fi
+echo "Waiting for runner endpoint..."
+while [ ! -f runner_endpoint.txt ]; do
+  git pull --rebase origin main
+  sleep 3
+done
+RUNNER_EP=$(cat runner_endpoint.txt)
+echo "Runner endpoint: $RUNNER_EP"
 
-# Check for git
-if [[ ! "$(command -v git)" ]]; then
-  echo "git not found, please install 'git' package!"
-  exit 4
-fi
+echo "Generating keys..."
+wg genkey | tee client_private.key | wg pubkey > client_pub.key
+cp client_pub.key client_pubkey.txt
+git add client_pubkey.txt
+git commit -m "CLIENT_PUBKEY" && git push
 
+echo "Waiting for runner public key..."
+while [ ! -f runner_pubkey.txt ]; do
+  git pull --rebase origin main
+  sleep 3
+done
+RUNNER_PUBKEY=$(cat runner_pubkey.txt)
+echo "Runner pubkey: $RUNNER_PUBKEY"
 
-# Choose random local source port from 20000-30000 range.
-# Linux/Android default local port range is 32768-60999,
-# Windows and macOS is 49152-65535.
-# Do not use ports from this range to prevent possible
-# mapping collision with some rare source-dependent-port-preserving
-# NATs.
-PORT=$(( 20000 + $RANDOM % 10000 ))
+echo "Sending UDP probes to runner..."
+RUNNER_IP=$(echo $RUNNER_EP | cut -d: -f1)
+RUNNER_PORT=$(echo $RUNNER_EP | cut -d: -f2)
+for i in $(seq 1 10); do
+  echo "probe" > /dev/udp/$RUNNER_IP/$RUNNER_PORT 2>/dev/null || true
+  sleep 1
+done
 
-# Run stun client with source port PORT and save its output,
-# stun.ekiga.net server with two external IP addresses,
-# which is important for receiving proper NAT type information.
-STUN_OUTPUT="$("$STUN" stun.ekiga.net -v -p $PORT 2>&1)"
+echo "Waiting for our external endpoint..."
+while [ ! -f client_endpoint.txt ]; do
+  git pull --rebase origin main
+  sleep 3
+done
+CLIENT_EP=$(cat client_endpoint.txt)
+echo "Our endpoint: $CLIENT_EP"
 
-# Extract external IP address and mapped port from stun output.
-IPPORT=$(echo "$STUN_OUTPUT" | awk '/MappedAddress/ {print $3; exit}')
+echo "Setting up WireGuard interface..."
+sudo ip link add wg0 type wireguard 2>/dev/null || true
+sudo ip addr add 10.0.0.2/30 dev wg0 2>/dev/null || true
+sudo wg set wg0 private-key client_private.key peer $RUNNER_PUBKEY allowed-ips 10.0.0.1/32 endpoint $RUNNER_EP
+sudo ip link set wg0 up
+sudo ip route add 10.0.0.1/32 dev wg0 2>/dev/null || true
 
-echo -n "Your NAT type is: "
-echo "$STUN_OUTPUT" | awk '/Primary:/ {print substr($0, index($0, $2)); exit}'
-echo
-
-# Random port, host/port dependent mapping NAT would not work unfortunately, as we
-# won't be able to determine NAT port mapping for GitHub Actions worker IP address.
-if [[ ! $(echo "$STUN_OUTPUT" | grep 'Independent Mapping') ]]; then
-  echo "Unfortunately, your NAT type uses random mappings for different destination host/port, which is not compatible"
-  echo "with this example. The script will now exit."
-  exit 4
-fi
-
-if [[ "$1" == "openvpn" ]]; then
-  git commit -m "OVPN: $IPPORT:$PORT" --allow-empty && git push
-elif [[ "$1" == "wireguard" ]]; then
-  git commit -m "WG: $IPPORT:$PORT" --allow-empty && git push
-fi
-
-echo
-echo ">>> Now check GitHub Actions job 'OpenVPN connection string' or 'WireGuard configuration file' for connection information <<<"
-
-# If out NAT does not map local source port to the same external source port,
-# keep mapping active in the background by sending empty UDP packets from our
-# local source port with 10s interval.
-# The 3.3.3.3 IP address here is in non-routed IP address space, the packets
-# would punch NAT but won't be delivered anywhere.
-# The port 443 here was chosen without any strong reason. It does not matter
-# for "Independent Mapping" NAT. We may have used ports 1024 or 1984 here
-# (two most common external port mappings in Actions for the first outgoing
-# request), just in case if there's someone who implemented
-# "port, but not address-dependent mapping" NAT. But for now, let it be just
-# 443.
-#
-# Short interval of 10 seconds is used to prevent the case when the client
-# press CTRL+C very close to NAT mapping expiration timeout, but not starting
-# OpenVPN/WireGuard connection in time.
-# Common "non-established" UDP NAT mapping timeout is 30 seconds.
-if [[ ! $(echo "$STUN_OUTPUT" | grep 'preserves ports') ]]; then
-
-  echo "> Punching NAT in the background, press CTRL+C just before connecting to the VPN!"
-  while [ 1 ]; do
-    echo | nc -n -u -p $PORT 3.3.3.3 443
-    sleep 10
-  done
-fi
+echo "Tunnel established! Try: ping 10.0.0.1"
