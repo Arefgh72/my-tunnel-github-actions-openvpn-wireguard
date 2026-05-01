@@ -32,5 +32,5 @@ jobs:
           PORT=$(cat socks_endpoint.txt | cut -d: -f2)
           # Create a simple TCP echo server first to test connectivity
           # (We will replace with a proper SOCKS server after success)
-          socat TCP-LISTEN:$PORT,fork EXEC:'cat' &
+          socat TCP-LISTEN:$PORT,fork SOCKS5-LISTEN:/dev/null &
           sleep 21600
