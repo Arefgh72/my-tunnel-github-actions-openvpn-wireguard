@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+git pull --rebase origin master || true
 git config --global credential.helper store
 
 echo "Requesting tunnel..."
