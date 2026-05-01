@@ -1,4 +1,4 @@
-name: WireGuard Tunnel
+name: WebSocket Tunnel
 
 on:
   push:
@@ -9,63 +9,38 @@ permissions:
 
 jobs:
   tunnel:
-    if: contains(github.event.head_commit.message, 'TUNNEL_REQUEST')
+    if: contains(github.event.head_commit.message, 'WS_TUNNEL_REQUEST')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: master
 
-      - name: Install wireguard
-        run: sudo apt update && sudo apt install -y wireguard-tools curl
-
-      - name: Generate keys and publish
+      - name: Install websocat and curl
         run: |
-          wg genkey | tee runner_private.key | wg pubkey > runner_pubkey.txt
+          sudo apt update && sudo apt install -y curl
+          curl -L -o websocat https://github.com/vi/websocat/releases/latest/download/websocat.x86_64-unknown-linux-musl
+          chmod +x websocat
+          sudo mv websocat /usr/local/bin/
+
+      - name: Pick port and publish endpoint
+        run: |
           PUBLIC_IP=$(curl -s ifconfig.me)
           PORT=$((20000 + RANDOM % 10000))
-          echo "$PUBLIC_IP:$PORT" > runner_endpoint.txt
+          echo "$PUBLIC_IP:$PORT" > ws_endpoint.txt
           git config user.name github-actions
           git config user.email github-actions@github.com
-          git add runner_endpoint.txt runner_pubkey.txt
-          git commit -m "RUNNER_INFO"
+          git add ws_endpoint.txt
+          git commit -m "WS_ENDPOINT"
           git push
 
-      - name: Wait for client pubkey
+      - name: Start WebSocket server
         run: |
-          while [ ! -f client_pubkey.txt ]; do
-            git pull --rebase
-            sleep 3
-          done
-
-      - name: Start WireGuard and get real client endpoint
-        run: |
-          PORT=$(cat runner_endpoint.txt | cut -d: -f2)
-          sudo ip link add wg0 type wireguard
-          sudo ip addr add 10.0.0.1/30 dev wg0
-          sudo wg set wg0 private-key runner_private.key listen-port $PORT
-          CLIENT_PUBKEY=$(cat client_pubkey.txt)
-          # Add client with a dummy endpoint (this will be updated on first authenticated handshake)
-          sudo wg set wg0 peer $CLIENT_PUBKEY allowed-ips 10.0.0.2/32 endpoint 127.0.0.1:12345
-          sudo ip link set wg0 up
-
-          echo "Waiting for real WireGuard handshake from client..."
-          # Poll for a handshake with the client (non-zero latest handshake time)
-          for i in $(seq 1 20); do
-            sleep 3
-            HANDSHAKE=$(sudo wg show wg0 latest-handshakes | grep "$CLIENT_PUBKEY" | awk '{print $2}')
-            if [ -n "$HANDSHAKE" ] && [ "$HANDSHAKE" -ne 0 ]; then
-              ENDPOINT=$(sudo wg show wg0 endpoints | grep "$CLIENT_PUBKEY" | awk '{print $2}')
-              if [ -n "$ENDPOINT" ] && [ "$ENDPOINT" != "127.0.0.1:12345" ]; then
-                sudo wg set wg0 peer $CLIENT_PUBKEY endpoint $ENDPOINT
-                echo "$ENDPOINT" > client_endpoint.txt
-                git add client_endpoint.txt
-                git commit -m "CLIENT_ENDPOINT"
-                git push
-                break
-              fi
-            fi
-          done
-
-      - name: Keep alive
-        run: sleep 21600
+          PORT=$(cat ws_endpoint.txt | cut -d: -f2)
+          # Run websocat as a TCP-to-WebSocket bridge on the chosen port
+          # It will listen for WebSocket connections and forward to a local SOCKS proxy (we'll set up a simple one)
+          # For simplicity, just create a simple echo server first to test connectivity
+          websocat -s 0.0.0.0:$PORT --binary -E &
+          sleep 2
+          # Keep alive
+          sleep 21600
