@@ -1,0 +1,26 @@
+name: Get libwrap0 dep
+
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+jobs:
+  get-deb:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download libwrap0
+        run: |
+          sudo apt update
+          cd /tmp
+          apt download libwrap0
+          mkdir -p $GITHUB_WORKSPACE/socat_debs
+          cp *.deb $GITHUB_WORKSPACE/socat_debs/
+      - name: Push to repo
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add socat_debs/
+          git commit -m "Add libwrap0 for socat"
+          git push
