@@ -1,7 +1,6 @@
 #!/bin/bash
 set -e
 
-# ذخیره اعتبارنامه گیت برای همیشه (تا هر بار رمز پرسیده نشود)
 git config --global credential.helper store
 
 echo "Requesting tunnel..."
@@ -29,19 +28,24 @@ done
 RUNNER_PUBKEY=$(cat runner_pubkey.txt)
 echo "Runner pubkey: $RUNNER_PUBKEY"
 
-echo "Sending UDP probes to runner..."
-RUNNER_IP=$(echo $RUNNER_EP | cut -d: -f1)
-RUNNER_PORT=$(echo $RUNNER_EP | cut -d: -f2)
-for i in $(seq 1 10); do
-  echo "probe" > /dev/udp/$RUNNER_IP/$RUNNER_PORT 2>/dev/null || true
-  sleep 1
-done
-
-echo "Waiting for our external endpoint..."
-while [ ! -f client_endpoint.txt ]; do
+echo "Waiting for runner to be ready to receive probes..."
+while [ ! -f runner_ready.txt ]; do
   git pull --rebase origin master
   sleep 3
 done
+echo "Runner is ready."
+
+RUNNER_IP=$(echo $RUNNER_EP | cut -d: -f1)
+RUNNER_PORT=$(echo $RUNNER_EP | cut -d: -f2)
+
+echo "Sending UDP probes continuously until capture..."
+# Keep sending probes while waiting for the client endpoint file
+while [ ! -f client_endpoint.txt ]; do
+  echo "probe" > /dev/udp/$RUNNER_IP/$RUNNER_PORT 2>/dev/null || true
+  sleep 2
+  git pull --rebase origin master
+done
+
 CLIENT_EP=$(cat client_endpoint.txt)
 echo "Our endpoint: $CLIENT_EP"
 
