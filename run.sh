@@ -28,7 +28,7 @@ done
 RUNNER_PUBKEY=$(cat runner_pubkey.txt)
 echo "Runner pubkey: $RUNNER_PUBKEY"
 
-echo "Waiting for runner to be ready to receive probes..."
+echo "Waiting for runner ready signal..."
 while [ ! -f runner_ready.txt ]; do
   git pull --rebase origin master
   sleep 3
@@ -38,10 +38,9 @@ echo "Runner is ready."
 RUNNER_IP=$(echo $RUNNER_EP | cut -d: -f1)
 RUNNER_PORT=$(echo $RUNNER_EP | cut -d: -f2)
 
-echo "Sending UDP probes continuously until capture..."
-# Keep sending probes while waiting for the client endpoint file
+echo "Sending UDP probes using Python3..."
 while [ ! -f client_endpoint.txt ]; do
-  echo "probe" > /dev/udp/$RUNNER_IP/$RUNNER_PORT 2>/dev/null || true
+  python3 -c "import socket; sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); sock.sendto(b'probe', ('$RUNNER_IP', $RUNNER_PORT)); sock.close()"
   sleep 2
   git pull --rebase origin master
 done
