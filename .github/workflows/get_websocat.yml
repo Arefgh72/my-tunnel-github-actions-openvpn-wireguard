@@ -1,0 +1,25 @@
+name: Get websocat binary
+
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+jobs:
+  get-binary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download websocat
+        run: |
+          curl -L -o websocat https://github.com/vi/websocat/releases/latest/download/websocat.x86_64-unknown-linux-musl
+          chmod +x websocat
+          mkdir -p tools
+          mv websocat tools/
+      - name: Push binary
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add tools/websocat
+          git commit -m "Add websocat binary"
+          git push
