@@ -1,4 +1,4 @@
-name: Tunnel Runner
+name: WireGuard Tunnel
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  run:
+  tunnel:
     if: contains(github.event.head_commit.message, 'TUNNEL_REQUEST')
     runs-on: ubuntu-latest
     steps:
@@ -16,65 +16,52 @@ jobs:
         with:
           ref: master
 
-      - name: Install tools
-        run: sudo apt update && sudo apt install -y wireguard-tools tcpdump curl
+      - name: Install wireguard
+        run: sudo apt update && sudo apt install -y wireguard-tools curl
 
-      - name: Get runner IP and pick port
+      - name: Generate keys and publish
         run: |
+          wg genkey | tee runner_private.key | wg pubkey > runner_pubkey.txt
           PUBLIC_IP=$(curl -s ifconfig.me)
           PORT=$((20000 + RANDOM % 10000))
           echo "$PUBLIC_IP:$PORT" > runner_endpoint.txt
           git config user.name github-actions
           git config user.email github-actions@github.com
-          git add runner_endpoint.txt
-          git commit -m "RUNNER_ENDPOINT"
+          git add runner_endpoint.txt runner_pubkey.txt
+          git commit -m "RUNNER_INFO"
           git push
 
-      - name: Wait for client public key
+      - name: Wait for client pubkey
         run: |
-          for i in $(seq 1 60); do
+          while [ ! -f client_pubkey.txt ]; do
             git pull --rebase
-            if [ -f client_pubkey.txt ]; then
-              break
-            fi
             sleep 3
           done
 
-      - name: Generate runner keys and share
-        run: |
-          wg genkey | tee runner_private.key | wg pubkey > runner_pubkey.txt
-          git add runner_pubkey.txt
-          git commit -m "RUNNER_PUBKEY"
-          git push
-
-      - name: Start WireGuard and signal readiness
+      - name: Start WireGuard and get real client endpoint
         run: |
           PORT=$(cat runner_endpoint.txt | cut -d: -f2)
           sudo ip link add wg0 type wireguard
           sudo ip addr add 10.0.0.1/30 dev wg0
           sudo wg set wg0 private-key runner_private.key listen-port $PORT
+          CLIENT_PUBKEY=$(cat client_pubkey.txt)
+          # Add client with dummy endpoint (will be updated on first handshake)
+          sudo wg set wg0 peer $CLIENT_PUBKEY allowed-ips 10.0.0.2/32 endpoint 127.0.0.1:12345
           sudo ip link set wg0 up
 
-          # Capture a single UDP packet to learn client's source IP:port
-          # Run tcpdump in background, then signal ready
-          sudo tcpdump -i any udp port $PORT -c 1 -n -q 2>/dev/null | awk '{print $3}' > client_endpoint.txt &
-          sleep 2
-          # Signal that we are ready to receive probes
-          echo "ready" > runner_ready.txt
-          git add runner_ready.txt
-          git commit -m "RUNNER_READY"
-          git push
+          # Wait for handshake from client, then extract real endpoint
+          for i in $(seq 1 20); do
+            sleep 3
+            ENDPOINT=$(sudo wg show wg0 endpoints | grep "$CLIENT_PUBKEY" | awk '{print $2}')
+            if [ -n "$ENDPOINT" ]; then
+              sudo wg set wg0 peer $CLIENT_PUBKEY endpoint $ENDPOINT
+              echo "$ENDPOINT" > client_endpoint.txt
+              git add client_endpoint.txt
+              git commit -m "CLIENT_ENDPOINT"
+              git push
+              break
+            fi
+          done
 
-          # Wait up to 60 seconds for tcpdump to capture a packet
-          wait
-          if [ -s client_endpoint.txt ]; then
-            CLIENT_EP=$(cat client_endpoint.txt)
-            CLIENT_PUBKEY=$(cat client_pubkey.txt)
-            sudo wg set wg0 peer $CLIENT_PUBKEY allowed-ips 10.0.0.2/32 endpoint $CLIENT_EP
-            git add client_endpoint.txt
-            git commit -m "CLIENT_ENDPOINT"
-            git push
-          fi
-
-      - name: Keep alive for 6 hours
+      - name: Keep alive
         run: sleep 21600
