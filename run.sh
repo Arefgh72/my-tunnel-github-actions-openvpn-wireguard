@@ -3,47 +3,35 @@ set -e
 
 git config --global credential.helper store
 
-echo "Requesting tunnel..."
+echo "Requesting WebSocket tunnel..."
 git pull --rebase origin master || true
-git commit --allow-empty -m "TUNNEL_REQUEST" && git push
+git commit --allow-empty -m "WS_TUNNEL_REQUEST" && git push
 
-echo "Waiting for runner info..."
-while [ ! -f runner_endpoint.txt ]; do
+echo "Waiting for WebSocket endpoint..."
+while [ ! -f ws_endpoint.txt ]; do
   git pull --rebase origin master
   sleep 3
 done
-RUNNER_EP=$(cat runner_endpoint.txt)
-echo "Runner endpoint: $RUNNER_EP"
+WS_EP=$(cat ws_endpoint.txt)
+echo "WebSocket endpoint: $WS_EP"
 
-while [ ! -f runner_pubkey.txt ]; do
-  git pull --rebase origin master
-  sleep 3
-done
-RUNNER_PUBKEY=$(cat runner_pubkey.txt)
-echo "Runner pubkey: $RUNNER_PUBKEY"
+WS_IP=$(echo $WS_EP | cut -d: -f1)
+WS_PORT=$(echo $WS_EP | cut -d: -f2)
 
-echo "Generating keys and sending public key..."
-wg genkey | tee client_private.key | wg pubkey > client_pub.key
-cp client_pub.key client_pubkey.txt
-git add client_pubkey.txt
-git commit -m "CLIENT_PUBKEY" && git push
+# Install websocat locally (in WSL)
+if ! command -v websocat &>/dev/null; then
+  echo "Installing websocat locally..."
+  sudo apt update && sudo apt install -y curl
+  curl -L -o websocat https://github.com/vi/websocat/releases/latest/download/websocat.x86_64-unknown-linux-musl
+  chmod +x websocat
+  sudo mv websocat /usr/local/bin/
+fi
 
-echo "Setting up interface and sending WireGuard handshake..."
-sudo ip link add wg0 type wireguard 2>/dev/null || true
-sudo ip addr add 10.0.0.2/30 dev wg0 2>/dev/null || true
-sudo wg set wg0 private-key client_private.key peer $RUNNER_PUBKEY allowed-ips 10.0.0.1/32 endpoint $RUNNER_EP
-sudo ip link set wg0 up
+# Test WebSocket connectivity (optional)
+echo "Testing WebSocket connection..."
+echo "Hello from client" | timeout 10 websocat -1 ws://$WS_IP:$WS_PORT || true
+echo "WebSocket test completed."
 
-echo "Waiting for runner to publish our real endpoint..."
-while [ ! -f client_endpoint.txt ]; do
-  git pull --rebase origin master
-  sleep 3
-done
-CLIENT_EP=$(cat client_endpoint.txt)
-echo "Our endpoint: $CLIENT_EP"
-
-# Update WireGuard with real endpoint just in case (already set by runner)
-sudo wg set wg0 peer $RUNNER_PUBKEY endpoint $CLIENT_EP 2>/dev/null || true
-sudo ip route add 10.0.0.1/32 dev wg0 2>/dev/null || true
-
-echo "Tunnel established! Try: ping 10.0.0.1"
+echo "WebSocket tunnel ready. You can now use websocat to forward any TCP traffic."
+echo "Example to create a SOCKS5 proxy on localhost:1080 through the tunnel:"
+echo "  websocat -b 0.0.0.0:1080 ws://$WS_IP:$WS_PORT &"
