@@ -1,9 +1,36 @@
 #!/bin/bash
 set -e
 
-git pull --rebase origin master || true
 git config --global credential.helper store
 
+# ---------- مرحلهٔ صفر: دریافت IP واقعی ما از سرور STUN داخلی ----------
+echo "Requesting STUN server..."
+git pull --rebase origin master || true
+git commit --allow-empty -m "STUN_REQUEST" && git push
+
+echo "Waiting for STUN server address..."
+while [ ! -f stun_server.txt ]; do
+  git pull --rebase origin master
+  sleep 3
+done
+STUN_ADDR=$(cat stun_server.txt)
+echo "STUN server at: $STUN_ADDR"
+
+STUN_IP=$(echo $STUN_ADDR | cut -d: -f1)
+STUN_PORT=$(echo $STUN_ADDR | cut -d: -f2)
+
+echo "Sending probe to STUN server..."
+python3 -c "import socket; sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); sock.sendto(b'probe', ('$STUN_IP', $STUN_PORT)); sock.close()"
+
+echo "Waiting for our external address..."
+while [ ! -f client_stun.txt ]; do
+  git pull --rebase origin master
+  sleep 3
+done
+CLIENT_EP=$(cat client_stun.txt)
+echo "Our endpoint: $CLIENT_EP"
+
+# ---------- مرحلهٔ اصلی: تونل وایرگارد ----------
 echo "Requesting tunnel..."
 git commit --allow-empty -m "TUNNEL_REQUEST" && git push
 
@@ -28,26 +55,6 @@ while [ ! -f runner_pubkey.txt ]; do
 done
 RUNNER_PUBKEY=$(cat runner_pubkey.txt)
 echo "Runner pubkey: $RUNNER_PUBKEY"
-
-echo "Waiting for runner ready signal..."
-while [ ! -f runner_ready.txt ]; do
-  git pull --rebase origin master
-  sleep 3
-done
-echo "Runner is ready."
-
-RUNNER_IP=$(echo $RUNNER_EP | cut -d: -f1)
-RUNNER_PORT=$(echo $RUNNER_EP | cut -d: -f2)
-
-echo "Sending UDP probes using Python3..."
-while [ ! -f client_endpoint.txt ]; do
-  python3 -c "import socket; sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); sock.sendto(b'probe', ('$RUNNER_IP', $RUNNER_PORT)); sock.close()"
-  sleep 2
-  git pull --rebase origin master
-done
-
-CLIENT_EP=$(cat client_endpoint.txt)
-echo "Our endpoint: $CLIENT_EP"
 
 echo "Setting up WireGuard interface..."
 sudo ip link add wg0 type wireguard 2>/dev/null || true
