@@ -1,0 +1,49 @@
+name: STUN Server
+
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: write
+
+jobs:
+  stun:
+    if: contains(github.event.head_commit.message, 'STUN_REQUEST')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Install Python3
+        run: sudo apt update && sudo apt install -y python3
+
+      - name: Pick random port and publish address
+        run: |
+          PUBLIC_IP=$(curl -s ifconfig.me)
+          PORT=$((20000 + RANDOM % 10000))
+          echo "$PUBLIC_IP:$PORT" > stun_server.txt
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add stun_server.txt
+          git commit -m "STUN_SERVER_ADDRESS"
+          git push
+
+      - name: Listen for client UDP packet and record its source
+        run: |
+          PORT=$(cat stun_server.txt | cut -d: -f2)
+          timeout 60 python3 -c "
+import socket, subprocess
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind(('0.0.0.0', $PORT))
+data, addr = sock.recvfrom(1024)
+with open('client_stun.txt', 'w') as f:
+    f.write(f'{addr[0]}:{addr[1]}')
+sock.close()
+"
+          if [ -f client_stun.txt ]; then
+            git add client_stun.txt
+            git commit -m "CLIENT_STUN_ADDRESS"
+            git push
+          fi
