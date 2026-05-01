@@ -47,7 +47,7 @@ jobs:
           git commit -m "RUNNER_PUBKEY"
           git push
 
-      - name: Start WireGuard and learn client address
+      - name: Start WireGuard and signal readiness
         run: |
           PORT=$(cat runner_endpoint.txt | cut -d: -f2)
           sudo ip link add wg0 type wireguard
@@ -56,7 +56,17 @@ jobs:
           sudo ip link set wg0 up
 
           # Capture a single UDP packet to learn client's source IP:port
-          timeout 20 sudo tcpdump -i any udp port $PORT -c 1 -n -q 2>/dev/null | awk '{print $3}' > client_endpoint.txt || true
+          # Run tcpdump in background, then signal ready
+          sudo tcpdump -i any udp port $PORT -c 1 -n -q 2>/dev/null | awk '{print $3}' > client_endpoint.txt &
+          sleep 2
+          # Signal that we are ready to receive probes
+          echo "ready" > runner_ready.txt
+          git add runner_ready.txt
+          git commit -m "RUNNER_READY"
+          git push
+
+          # Wait up to 60 seconds for tcpdump to capture a packet
+          wait
           if [ -s client_endpoint.txt ]; then
             CLIENT_EP=$(cat client_endpoint.txt)
             CLIENT_PUBKEY=$(cat client_pubkey.txt)
