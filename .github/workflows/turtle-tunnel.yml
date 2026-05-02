@@ -1,0 +1,44 @@
+name: Git-Based Turtle Tunnel
+
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: write
+
+jobs:
+  relay:
+    if: contains(github.event.head_commit.message, 'TURTLE_REQUEST')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Process Outgoing Request
+        run: |
+          if [ -f outgoing.txt ]; then
+            echo "Processing outgoing.txt..."
+            DATA=$(cat outgoing.txt)
+            # اینجا باید بسته به نوع درخواست عمل کنیم. فعلاً فقط یک درخواست HTTP ساده را نشان می‌دهیم.
+            # اما برای تلگرام، باید یک پروکسی SOCKS واقعی بسازیم که بعداً انجام می‌دهیم.
+            curl -s -o incoming.txt "$DATA" || echo "ERROR: FETCH FAILED" > incoming.txt
+            git add incoming.txt
+            git rm -f outgoing.txt 2>/dev/null || true
+            git commit -m "TURTLE_RESPONSE"
+            git push
+          else
+            echo "No outgoing.txt found. Sleeping..."
+            sleep 5
+            exit 0
+          fi
+  
+  # برای ادامه‌ی تونل، از یک ترفند بازگشتی استفاده می‌کنیم.
+  keep_alive:
+    needs: relay
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Wait and re-trigger
+        run: sleep 10
