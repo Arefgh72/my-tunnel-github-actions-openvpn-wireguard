@@ -1,0 +1,51 @@
+name: Listen for Client Connection
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  wait_for_client:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Publish Runner's Public IP
+        run: |
+          PUBLIC_IP=$(curl -s ifconfig.me)
+          echo "Runner Public IP: $PUBLIC_IP"
+          echo "$PUBLIC_IP" > runner_ip.txt
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add runner_ip.txt
+          git commit -m "RUNNER_IP"
+          git push
+
+      - name: Start Simple Python Web Server on Port 443
+        run: |
+          # ساخت یک اسکریپت پایتون برای سرور
+          cat << 'EOF' > server.py
+          import http.server, socketserver, socket
+
+          class Handler(http.server.SimpleHTTPRequestHandler):
+              def do_GET(self):
+                  self.send_response(200)
+                  self.end_headers()
+                  self.wfile.write(b'Connection successful')
+
+          socketserver.TCPServer.allow_reuse_address = True
+          httpd = socketserver.TCPServer(('0.0.0.0', 443), Handler)
+          print('Server listening on port 443...')
+          httpd.serve_forever()
+          EOF
+
+          # اجرای سرور با sudo و در پس‌زمینه
+          sudo python3 server.py &
+          sleep 2
+          echo "Server is up."
+
+      - name: Keep Alive
+        run: sleep 1800   # 30 دقیقه (حداکثر زمان اجرا برای مخازن خصوصی/عمومی)
