@@ -1,0 +1,33 @@
+name: Echo Tunnel
+
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: write
+
+jobs:
+  echo:
+    if: contains(github.event.head_commit.message, 'ECHO_REQUEST')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Process echo
+        run: |
+          if [ -f echo_request.txt ]; then
+            CONTENT=$(cat echo_request.txt)
+            echo "ECHO: $CONTENT" > echo_response.txt
+            rm echo_request.txt
+            git config user.name github-actions
+            git config user.email github-actions@github.com
+            git add echo_response.txt
+            git rm --cached echo_request.txt 2>/dev/null || true
+            git commit -m "ECHO_RESPONSE"
+            git push
+          else
+            echo "No echo_request.txt found."
+          fi
