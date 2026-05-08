@@ -1,0 +1,36 @@
+name: Get pip and mhr-cfw requirements
+
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+jobs:
+  get-pip-and-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone mhr-cfw and download all dependencies
+        run: |
+          git clone https://github.com/denuitt1/mhr-cfw.git /tmp/mhr-cfw
+          cd /tmp/mhr-cfw
+          # دانلود بسته‌های سیستمی python3-pip (و وابستگی‌هاش)
+          sudo apt update
+          apt download python3-pip python3-wheel python3-setuptools libpython3-dev python3-dev
+          # دانلود بسته‌های پایتونی مورد نیاز پروژه
+          pip3 download -d /tmp/wheels -r requirements.txt
+          # همه رو توی یک پوشه آماده کن
+          mkdir -p $GITHUB_WORKSPACE/offline_packages
+          cp /tmp/mhr-cfw/*.deb $GITHUB_WORKSPACE/offline_packages/ 2>/dev/null || true
+          cp /tmp/wheels/*.whl $GITHUB_WORKSPACE/offline_packages/ 2>/dev/null || true
+          # آخرین نسخه‌ی خود requirements.txt رو هم کپی کن
+          cp /tmp/mhr-cfw/requirements.txt $GITHUB_WORKSPACE/offline_packages/
+
+      - name: Commit and push to repository
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add offline_packages/
+          git commit -m "Add pip and mhr-cfw dependencies"
+          git push
